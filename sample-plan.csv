@@ -1,0 +1,5 @@
+date,week_number,day_of_week,workout_type,title,distance_km,duration_min,description,pace_target,notes
+2026-08-24,1,Monday,Easy,10k Easy Run,10,,Conversational running,Easy,
+2026-08-25,1,Tuesday,Intervals,800m Repeats,10.2,60,10 x 800m with easy recovery,5K pace,
+2026-08-27,1,Thursday,Easy,8k Easy Run,8,,Keep effort controlled,Easy,
+2026-08-29,1,Saturday,Long,31k Long Run,31,,Steady long run,Long run pace,

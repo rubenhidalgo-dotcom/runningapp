@@ -1,26 +1,33 @@
 {
-  "name": "runningapp-scaffold",
-  "version": "0.1.0",
+  "name": "runningapp",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint .",
+    "cf:build": "opennextjs-cloudflare build",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "db:local": "wrangler d1 migrations apply runningapp-db --local",
+    "db:remote": "wrangler d1 migrations apply runningapp-db --remote"
   },
   "dependencies": {
+    "@opennextjs/cloudflare": "^1.14.7",
+    "lucide-react": "^0.542.0",
     "next": "16.3.3",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
+    "@cloudflare/workers-types": "latest",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
     "eslint-config-next": "16.3.3",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5.9.0",
+    "wrangler": "^4.33.0"
   }
 }
