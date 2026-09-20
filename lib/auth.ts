@@ -5,7 +5,7 @@ const COOKIE_NAME = "__Host-run_session";
 const SESSION_LIFETIME_SECONDS =
   60 * 60 * 24 * 30;
 
-const PASSWORD_ITERATIONS = 600_000;
+const PASSWORD_ITERATIONS = 100_000;
 const MINIMUM_PASSWORD_LENGTH = 12;
 
 export type AuthUser = {
