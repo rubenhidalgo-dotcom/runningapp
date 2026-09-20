@@ -1,5 +1,11 @@
-import { db, jsonError, userId } from "@/lib/db";
+import {
+  requireUserId,
+} from "@/lib/auth";
 
+import {
+  db,
+  jsonError,
+} from "@/lib/db";
 type UpdateWorkoutBody = {
   completed?: boolean;
   actualDistanceKm?: number | string | null;
@@ -11,7 +17,7 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const uid = userId(request);
+    const uid = await requireUserId(request);
     const { id } = await context.params;
     const body = (await request.json()) as UpdateWorkoutBody;
     const database = await db();

@@ -7,11 +7,63 @@ const iso=(d=new Date())=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*60
 const fmt=(d:string)=>new Intl.DateTimeFormat("en-GB",{weekday:"long",day:"numeric",month:"long"}).format(new Date(d+"T12:00:00"));
 const km=(n:number)=>`${n.toFixed(1)} km`;
 export default function RunApp({initialTab="today"}:{initialTab?:Tab}){
- const [tab,setTab]=useState<Tab>(initialTab),[uid,setUid]=useState(""),[workouts,setWorkouts]=useState<Workout[]>([]),[loading,setLoading]=useState(true),[modal,setModal]=useState<null|{kind:"complete";workout:Workout}|{kind:"manual"}>(null),[error,setError]=useState("");
- const api=useCallback(async(path:string,options:RequestInit={})=>{const r=await fetch(path,{...options,headers:{...options.headers,"x-user-id":uid}});const data=await r.json();if(!r.ok)throw new Error(data.error||"Request failed");return data},[uid]);
- const refresh=useCallback(async()=>{if(!uid)return;const d=await api("/api/workouts");setWorkouts(d.workouts)},[api,uid]);
- useEffect(()=>{let id=localStorage.getItem("run-user-id");if(!id){id=crypto.randomUUID();localStorage.setItem("run-user-id",id)}setUid(id)},[]);
- useEffect(()=>{if(!uid)return;(async()=>{try{await api("/api/bootstrap",{method:"POST"});await refresh()}catch(e){setError(e instanceof Error?e.message:"Could not load app")}finally{setLoading(false)}})()},[uid,api,refresh]);
+ const [tab,setTab]=useState<Tab>(initialTab),[workouts,setWorkouts]=useState<Workout[]>([]),[loading,setLoading]=useState(true),[modal,setModal]=useState<null|{kind:"complete";workout:Workout}|{kind:"manual"}>(null),[error,setError]=useState("");
+ const api = useCallback(
+  async (
+    path: string,
+    options: RequestInit = {},
+  ) => {
+    const response = await fetch(path, {
+      ...options,
+      credentials: "include",
+      headers: {
+        ...options.headers,
+      },
+    });
+
+    const data = await response.json();
+
+    if (response.status === 401) {
+      window.location.replace("/login");
+
+      throw new Error(
+        "Your session has expired.",
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data.error ?? "Request failed",
+      );
+    }
+
+    return data;
+  },
+  [],
+);
+const refresh = useCallback(async () => {
+  const data = await api("/api/workouts");
+
+  setWorkouts(data.workouts);
+}, [api]);
+
+useEffect(() => {
+  async function loadApp() {
+    try {
+      await refresh();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Could not load the app.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  void loadApp();
+}, [refresh]);
  const navigate=(t:Tab)=>{setTab(t);history.replaceState(null,"",t==="today"?"/":`/${t}`)};
  if(loading)return <main className="app"><div className="loading">Loading RUN…</div></main>;
  return <main className="app"><header className="top"><div className="brand">RUN</div><div className="avatar">R</div></header>{error&&<div className="error">{error}</div>}{tab==="today"&&<Today workouts={workouts} onComplete={w=>setModal({kind:"complete",workout:w})}/>} {tab === "week" && (
@@ -424,14 +476,50 @@ function SettingsPage({
       </div>
 
       <div className="card">
-        <h2>About anonymous access</h2>
+  <h2>Account</h2>
 
-        <p className="muted">
-          This version stores an anonymous ID on this
-          device. It is not secure authentication. Accounts
-          can be added later.
-        </p>
-      </div>
+  <p className="muted">
+    Sign out of RUN on this device. Your training plans,
+    completed workouts, actual kilometres, and notes will
+    remain saved to your account.
+  </p>
+
+  <button
+    type="button"
+    className="secondary"
+    onClick={async () => {
+      setError("");
+
+      try {
+        const response = await fetch(
+          "/api/auth/logout",
+          {
+            method: "POST",
+            credentials: "include",
+          },
+        );
+
+        if (!response.ok) {
+          const data = await response.json();
+
+          throw new Error(
+            data.error ?? "Could not sign out.",
+          );
+        }
+
+        window.location.href = "/login";
+      } catch (error) {
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Could not sign out.",
+        );
+      }
+    }}
+  >
+    Sign out
+  </button>
+</div>
     </>
   );
 }

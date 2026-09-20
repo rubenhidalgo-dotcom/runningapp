@@ -1,2 +1,5 @@
-import RunApp from "@/components/run-app";
-export default function Page(){return <RunApp initialTab="plan"/>}
+import ProtectedRunApp from "@/components/protected-run-app";
+
+export default function Page() {
+  return <ProtectedRunApp initialTab="plan" />;
+}

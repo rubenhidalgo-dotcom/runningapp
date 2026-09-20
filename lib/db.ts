@@ -25,9 +25,30 @@ export function userId(request: Request): string {
   return id;
 }
 
-export function jsonError(error: unknown, status = 400): Response {
+export function jsonError(
+  error: unknown,
+  status?: number,
+): Response {
   const message =
-    error instanceof Error ? error.message : "Unexpected error";
+    error instanceof Error
+      ? error.message
+      : "Unexpected error";
 
-  return Response.json({ error: message }, { status });
+  const responseStatus =
+    status ??
+    (message === "UNAUTHENTICATED"
+      ? 401
+      : 400);
+
+  return Response.json(
+    {
+      error:
+        message === "UNAUTHENTICATED"
+          ? "You need to sign in."
+          : message,
+    },
+    {
+      status: responseStatus,
+    },
+  );
 }
