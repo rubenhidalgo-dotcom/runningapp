@@ -9,6 +9,10 @@ type ManualWorkoutBody = {
   notes?: string | null;
 };
 
+type WorkoutResult = {
+  workout_date: string;
+};
+
 export async function GET(request: Request) {
   try {
     const uid = await requireUserId(request);
@@ -52,7 +56,34 @@ export async function GET(request: Request) {
               wl.actual_duration_min,
               wl.notes AS workout_notes,
               wl.completed_at,
-              'plan' AS source
+              'plan' AS source,
+              COALESCE(
+                (
+                  SELECT json_group_array(
+                    json_object(
+                      'id', se.id,
+                      'exercise_order', se.exercise_order,
+                      'exercise_name', se.exercise_name,
+                      'sets', se.sets,
+                      'reps', se.reps,
+                      'weight', se.weight,
+                      'weight_unit', se.weight_unit,
+                      'duration_seconds', se.duration_seconds,
+                      'distance_meters', se.distance_meters,
+                      'rest_seconds', se.rest_seconds,
+                      'target_rir', se.target_rir,
+                      'target_rpe', se.target_rpe,
+                      'tempo', se.tempo,
+                      'side', se.side,
+                      'notes', se.notes
+                    )
+                  )
+                  FROM strength_exercises se
+                  WHERE se.workout_id = w.id
+                  ORDER BY se.exercise_order
+                ),
+                '[]'
+              ) AS strength_exercises
             FROM workouts w
             LEFT JOIN workout_logs wl
               ON wl.id = (
@@ -60,7 +91,10 @@ export async function GET(request: Request) {
                 FROM workout_logs wl2
                 WHERE wl2.user_id = ?
                   AND wl2.planned_workout_id = w.id
-                  AND wl2.completion_status IN ('completed', 'partial')
+                  AND wl2.completion_status IN (
+                    'completed',
+                    'partial'
+                  )
                 ORDER BY wl2.completed_at DESC
                 LIMIT 1
               )
@@ -69,8 +103,8 @@ export async function GET(request: Request) {
             ORDER BY w.workout_date, w.created_at
           `)
           .bind(uid, activePlan.id)
-          .all()
-      : { results: [] };
+          .all<WorkoutResult>()
+      : { results: [] as WorkoutResult[] };
 
     const manualLogs = await database
       .prepare(`
@@ -93,20 +127,23 @@ export async function GET(request: Request) {
           wl.actual_duration_min,
           wl.notes AS workout_notes,
           wl.completed_at,
-          'manual' AS source
+          'manual' AS source,
+          '[]' AS strength_exercises
         FROM workout_logs wl
         WHERE wl.user_id = ?
           AND wl.source = 'manual'
         ORDER BY wl.workout_date, wl.created_at
       `)
       .bind(uid)
-      .all();
+      .all<WorkoutResult>();
 
     const workouts = [
       ...plannedWorkouts.results,
       ...manualLogs.results,
     ].sort((a, b) =>
-      String(a.workout_date).localeCompare(String(b.workout_date)),
+      String(a.workout_date).localeCompare(
+        String(b.workout_date),
+      ),
     );
 
     return Response.json({
@@ -121,12 +158,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const uid = await requireUserId(request);
-    const body = (await request.json()) as ManualWorkoutBody;
+    const body =
+      (await request.json()) as ManualWorkoutBody;
     const database = await db();
 
     const date = String(body.date || "");
-    const title = String(body.title || "Manual run").trim();
-    const distance = Number(body.actualDistanceKm);
+    const title = String(
+      body.title || "Manual run",
+    ).trim();
+    const distance = Number(
+      body.actualDistanceKm,
+    );
+
     const duration =
       body.durationMin === null ||
       body.durationMin === undefined ||
@@ -135,22 +178,36 @@ export async function POST(request: Request) {
         : Number(body.durationMin);
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      throw new Error("Enter a valid workout date.");
+      throw new Error(
+        "Enter a valid workout date.",
+      );
     }
 
     if (!title) {
-      throw new Error("Enter a workout title.");
+      throw new Error(
+        "Enter a workout title.",
+      );
     }
 
-    if (!Number.isFinite(distance) || distance < 0) {
-      throw new Error("Enter a valid actual distance.");
+    if (
+      !Number.isFinite(distance) ||
+      distance < 0
+    ) {
+      throw new Error(
+        "Enter a valid actual distance.",
+      );
     }
 
     if (
       duration !== null &&
-      (!Number.isFinite(duration) || duration < 0)
+      (
+        !Number.isFinite(duration) ||
+        duration < 0
+      )
     ) {
-      throw new Error("Enter a valid duration.");
+      throw new Error(
+        "Enter a valid duration.",
+      );
     }
 
     const now = Date.now();
@@ -176,8 +233,21 @@ export async function POST(request: Request) {
           updated_at
         )
         VALUES (
-          ?, ?, NULL, NULL, ?, 'run', ?, 'completed',
-          ?, ?, ?, ?, 'manual', ?, ?
+          ?,
+          ?,
+          NULL,
+          NULL,
+          ?,
+          'run',
+          ?,
+          'completed',
+          ?,
+          ?,
+          ?,
+          ?,
+          'manual',
+          ?,
+          ?
         )
       `)
       .bind(
@@ -194,7 +264,15 @@ export async function POST(request: Request) {
       )
       .run();
 
-    return Response.json({ id, logId: id }, { status: 201 });
+    return Response.json(
+      {
+        id,
+        logId: id,
+      },
+      {
+        status: 201,
+      },
+    );
   } catch (error) {
     return jsonError(error);
   }
