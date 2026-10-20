@@ -1577,27 +1577,18 @@ function SettingsPage({
         )}
 
         <div className="field">
-          <label htmlFor="training-plan-file">
-            CHOOSE A CSV FILE
-          </label>
+  <label htmlFor="training-plan-file">
+    CHOOSE A CSV FILE
+  </label>
 
-          <input
-          id="training-plan-file"
-          name="file"
-          type="file"
-          accept=".csv,text/csv,application/csv,application/vnd.ms-excel,text/comma-separated-values"
-          required
-          style={{
-            display: "block",
-            width: "100%",
-            minHeight: 48,
-            padding: "10px 0",
-            position: "relative",
-            zIndex: 2,
-            pointerEvents: "auto",
-          }}
-        />
-        </div>
+  <input
+    className="file"
+    id="training-plan-file"
+    name="file"
+    type="file"
+    required
+  />
+</div>
 
         <button className="primary" type="submit">
           Import CSV
