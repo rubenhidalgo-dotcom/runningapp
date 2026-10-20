@@ -1,154 +1,584 @@
 "use client";
-import { useCallback,useEffect,useMemo,useState } from "react";
-import { CalendarDays,Check,ChevronLeft,ChevronRight,ClipboardList,Plus,Settings,Sun,CalendarRange,X } from "lucide-react";
-type Tab="today"|"week"|"plan"|"settings";
-type Workout={id:string;workout_date:string;week_number:number|null;workout_type:string|null;title:string;planned_distance_km:number;duration_min:number|null;description:string|null;pace_target:string|null;completed:number;actual_distance_km:number|null;workout_notes:string|null;source:string};
-const iso=(d=new Date())=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,10)};
-const fmt=(d:string)=>new Intl.DateTimeFormat("en-GB",{weekday:"long",day:"numeric",month:"long"}).format(new Date(d+"T12:00:00"));
-const km=(n:number)=>`${n.toFixed(1)} km`;
-export default function RunApp({initialTab="today"}:{initialTab?:Tab}){
- const [tab,setTab]=useState<Tab>(initialTab),[workouts,setWorkouts]=useState<Workout[]>([]),[loading,setLoading]=useState(true),[modal,setModal]=useState<null|{kind:"complete";workout:Workout}|{kind:"manual"}>(null),[error,setError]=useState("");
- const api = useCallback(
-  async (
-    path: string,
-    options: RequestInit = {},
-  ) => {
-    const response = await fetch(path, {
-      ...options,
-      credentials: "include",
-      headers: {
-        ...options.headers,
-      },
-    });
 
-    const data = await response.json();
+import {
+  CalendarDays,
+  CalendarRange,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  Dumbbell,
+  Plus,
+  Settings,
+  Sun,
+  Trash2,
+  X,
+} from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-    if (response.status === 401) {
-      window.location.replace("/login");
+type Tab = "today" | "week" | "plan" | "settings";
 
-      throw new Error(
-        "Your session has expired.",
-      );
-    }
+type ApiFunction = <T>(
+  path: string,
+  options?: RequestInit,
+) => Promise<T>;
 
-    if (!response.ok) {
-      throw new Error(
-        data.error ?? "Request failed",
-      );
-    }
+type StrengthExercise = {
+  id: string;
+  exercise_order: number;
+  exercise_name: string;
+  sets: number | null;
+  reps: string | null;
+  weight: number | null;
+  weight_unit: string | null;
+  duration_seconds: number | null;
+  distance_meters: number | null;
+  rest_seconds: number | null;
+  target_rir: number | null;
+  target_rpe: number | null;
+  tempo: string | null;
+  side: string | null;
+  notes: string | null;
+};
 
-    return data;
-  },
-  [],
-);
-const refresh = useCallback(async () => {
-  const data = await api("/api/workouts");
+type Workout = {
+  id: string;
+  plan_id: string | null;
+  workout_date: string;
+  week_number: number | null;
+  day_of_week: string | null;
+  workout_type: string | null;
+  title: string;
+  planned_distance_km: number;
+  duration_min: number | null;
+  actual_duration_min: number | null;
+  description: string | null;
+  pace_target: string | null;
+  notes: string | null;
+  completed: number;
+  log_id: string | null;
+  actual_distance_km: number | null;
+  workout_notes: string | null;
+  completed_at: number | null;
+  source: string;
+  strength_exercises: StrengthExercise[];
+};
 
-  setWorkouts(data.workouts);
-}, [api]);
+type RawWorkout = Omit<Workout, "strength_exercises"> & {
+  strength_exercises: StrengthExercise[] | string | null;
+};
 
-useEffect(() => {
-  async function loadApp() {
-    try {
-      await refresh();
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Could not load the app.",
-      );
-    } finally {
-      setLoading(false);
-    }
+type Plan = {
+  id: string;
+  name: string;
+  created_at: number;
+  updated_at: number | null;
+  active: number;
+  workout_count: number;
+  strength_workout_count: number;
+};
+
+type WorkoutsResponse = {
+  activePlanId: string | null;
+  workouts: RawWorkout[];
+};
+
+type PlansResponse = {
+  plans: Plan[];
+};
+
+type ImportResponse = {
+  imported: number;
+  strengthExercises: number;
+  planId: string;
+  active: boolean;
+};
+
+type DeleteHistoryResponse = {
+  ok: boolean;
+  deleted: number;
+};
+
+type ModalState =
+  | { kind: "complete"; workout: Workout }
+  | { kind: "manual" }
+  | null;
+
+const dateToIso = (date: Date) => {
+  const localDate = new Date(
+    date.getTime() - date.getTimezoneOffset() * 60000,
+  );
+
+  return localDate.toISOString().slice(0, 10);
+};
+
+const APP_TODAY = dateToIso(new Date());
+
+const APP_YESTERDAY = (() => {
+  const date = new Date(`${APP_TODAY}T12:00:00`);
+  date.setDate(date.getDate() - 1);
+  return dateToIso(date);
+})();
+
+function formatDate(date: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(new Date(`${date}T12:00:00`));
+}
+
+function formatKm(value: number) {
+  return `${value.toFixed(1)} km`;
+}
+
+function parseStrengthExercises(
+  value: RawWorkout["strength_exercises"],
+): StrengthExercise[] {
+  if (Array.isArray(value)) {
+    return value;
   }
 
-  void loadApp();
-}, [refresh]);
- const navigate=(t:Tab)=>{setTab(t);history.replaceState(null,"",t==="today"?"/":`/${t}`)};
- if(loading)return <main className="app"><div className="loading">Loading RUN…</div></main>;
- return <main className="app"><header className="top"><div className="brand">RUN</div><div className="avatar">R</div></header>{error&&<div className="error">{error}</div>}{tab==="today"&&<Today workouts={workouts} onComplete={w=>setModal({kind:"complete",workout:w})}/>} {tab === "week" && (
-  <Week
-    workouts={workouts}
-    onComplete={(workout) =>
-      setModal({
-        kind: "complete",
-        workout,
-      })
-    }
-  />
-)} {tab==="plan"&&<Plan workouts={workouts} onComplete={w=>setModal({kind:"complete",workout:w})}/>} {tab==="settings"&&<SettingsPage api={api} onDone={refresh}/>} {tab==="today"&&<button className="fab" aria-label="Log an unscheduled run" onClick={()=>setModal({kind:"manual"})}><Plus/></button>}<Nav tab={tab} onChange={navigate}/>{modal&&<WorkoutModal modal={modal} api={api} close={()=>setModal(null)} done={async()=>{setModal(null);await refresh()}}/>}</main>
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? (parsed as StrengthExercise[])
+      : [];
+  } catch {
+    return [];
+  }
 }
+
+function normalizeWorkout(workout: RawWorkout): Workout {
+  return {
+    ...workout,
+    strength_exercises: parseStrengthExercises(
+      workout.strength_exercises,
+    ),
+  };
+}
+
+function isStrengthWorkout(workout: Workout) {
+  return (
+    String(workout.workout_type || "").toLowerCase() ===
+    "strength"
+  );
+}
+
+function getExerciseTarget(exercise: StrengthExercise) {
+  const parts: string[] = [];
+
+  if (exercise.sets) {
+    parts.push(
+      `${exercise.sets} ${
+        exercise.sets === 1 ? "set" : "sets"
+      }`,
+    );
+  }
+
+  if (exercise.reps) {
+    parts.push(`${exercise.reps} reps`);
+  }
+
+  if (
+    exercise.weight !== null &&
+    exercise.weight !== undefined
+  ) {
+    parts.push(
+      `${exercise.weight} ${exercise.weight_unit || ""}`.trim(),
+    );
+  } else if (exercise.weight_unit === "bodyweight") {
+    parts.push("bodyweight");
+  }
+
+  if (exercise.duration_seconds) {
+    parts.push(`${exercise.duration_seconds} sec`);
+  }
+
+  if (exercise.distance_meters) {
+    parts.push(`${exercise.distance_meters} m`);
+  }
+
+  return parts.join(" · ");
+}
+
+function getWeekBounds(offset: number) {
+  const today = new Date(`${APP_TODAY}T12:00:00`);
+  const monday = new Date(today);
+
+  monday.setDate(
+    today.getDate() -
+      ((today.getDay() + 6) % 7) +
+      offset * 7,
+  );
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  return { monday, sunday };
+}
+
+export default function RunApp({
+  initialTab = "today",
+}: {
+  initialTab?: Tab;
+}) {
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [activePlanId, setActivePlanId] =
+    useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState<ModalState>(null);
+  const [error, setError] = useState("");
+
+  const api = useCallback(
+    async <T,>(
+      path: string,
+      options: RequestInit = {},
+    ): Promise<T> => {
+      const response = await fetch(path, {
+        ...options,
+        credentials: "include",
+        headers: {
+          ...options.headers,
+        },
+      });
+
+      const data = (await response.json()) as T & {
+        error?: string;
+      };
+
+      if (response.status === 401) {
+        window.location.replace("/login");
+        throw new Error("Your session has expired.");
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error || "Request failed.");
+      }
+
+      return data;
+    },
+    [],
+  ) as ApiFunction;
+
+  const refresh = useCallback(async () => {
+    const data = await api<WorkoutsResponse>("/api/workouts");
+
+    setActivePlanId(data.activePlanId);
+    setWorkouts(data.workouts.map(normalizeWorkout));
+  }, [api]);
+
+  useEffect(() => {
+    async function loadApp() {
+      try {
+        await refresh();
+      } catch (caughtError) {
+        setError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Could not load the app.",
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    void loadApp();
+  }, [refresh]);
+
+  function navigate(nextTab: Tab) {
+    setTab(nextTab);
+
+    window.history.replaceState(
+      null,
+      "",
+      nextTab === "today" ? "/" : `/${nextTab}`,
+    );
+  }
+
+  if (loading) {
+    return (
+      <main className="app">
+        <div className="loading">Loading RUN…</div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="app">
+      <header className="top">
+        <div className="brand">RUN</div>
+        <div className="avatar">R</div>
+      </header>
+
+      {error && <div className="error">{error}</div>}
+
+      {tab === "today" && (
+        <Today
+          workouts={workouts}
+          onComplete={(workout) =>
+            setModal({ kind: "complete", workout })
+          }
+        />
+      )}
+
+      {tab === "week" && (
+        <Week
+          workouts={workouts}
+          onComplete={(workout) =>
+            setModal({ kind: "complete", workout })
+          }
+        />
+      )}
+
+      {tab === "plan" && (
+        <PlanView
+          workouts={workouts}
+          activePlanId={activePlanId}
+          onComplete={(workout) =>
+            setModal({ kind: "complete", workout })
+          }
+        />
+      )}
+
+      {tab === "settings" && (
+        <SettingsPage api={api} onDone={refresh} />
+      )}
+
+      {tab === "today" && (
+        <button
+          className="fab"
+          type="button"
+          aria-label="Log an unscheduled run"
+          onClick={() => setModal({ kind: "manual" })}
+        >
+          <Plus />
+        </button>
+      )}
+
+      <Nav tab={tab} onChange={navigate} />
+
+      {modal && (
+        <WorkoutModal
+          modal={modal}
+          api={api}
+          close={() => setModal(null)}
+          done={async () => {
+            setModal(null);
+            await refresh();
+          }}
+        />
+      )}
+    </main>
+  );
+}
+
 function WorkoutCard({
-  w,
+  workout,
   onComplete,
   showDate = false,
   showDetails = true,
 }: {
-  w: Workout;
+  workout: Workout;
   onComplete: (workout: Workout) => void;
   showDate?: boolean;
   showDetails?: boolean;
 }) {
+  const strength = isStrengthWorkout(workout);
+
   const distanceLabel =
-    w.source === "manual"
-      ? `Actual ${km(Number(w.actual_distance_km || 0))}`
-      : `Planned ${km(Number(w.planned_distance_km || 0))}`;
+    workout.source === "manual"
+      ? `Actual ${formatKm(
+          Number(workout.actual_distance_km || 0),
+        )}`
+      : `Planned ${formatKm(
+          Number(workout.planned_distance_km || 0),
+        )}`;
 
   return (
     <article className="card">
       <div className="workout-row">
         <button
-          className={`check ${w.completed ? "done" : ""}`}
-          onClick={() => onComplete(w)}
+          className={`check ${workout.completed ? "done" : ""}`}
+          type="button"
+          onClick={() => onComplete(workout)}
           aria-label={
-            w.completed ? "Edit completed workout" : "Complete workout"
+            workout.completed
+              ? "Edit completed workout"
+              : "Complete workout"
           }
         >
-          {w.completed ? <Check size={16} /> : null}
+          {workout.completed ? <Check size={16} /> : null}
         </button>
 
         <div className="grow">
-          <div className="title">{w.title}</div>
+          <div className="title">{workout.title}</div>
 
           {showDate && (
-            <div className="muted">{fmt(w.workout_date)}</div>
+            <div className="muted">
+              {formatDate(workout.workout_date)}
+            </div>
           )}
 
           <div className="meta">
-            {w.workout_type && (
-              <span className="pill">{w.workout_type}</span>
+            {strength ? (
+              <span className="pill">
+                <Dumbbell size={13} />
+                Strength
+              </span>
+            ) : (
+              <>
+                {workout.workout_type && (
+                  <span className="pill">
+                    {workout.workout_type}
+                  </span>
+                )}
+
+                <span className="pill">{distanceLabel}</span>
+              </>
             )}
 
-            <span className="pill">{distanceLabel}</span>
-
-            {Boolean(w.completed) && w.source !== "manual" && (
+            {workout.duration_min !== null && (
               <span className="pill">
-                Actual {km(Number(w.actual_distance_km || 0))}
+                {workout.duration_min} min
               </span>
             )}
 
-            {w.pace_target && (
-              <span className="pill">{w.pace_target}</span>
+            {Boolean(workout.completed) &&
+              !strength &&
+              workout.source !== "manual" && (
+                <span className="pill">
+                  Actual{" "}
+                  {formatKm(
+                    Number(workout.actual_distance_km || 0),
+                  )}
+                </span>
+              )}
+
+            {workout.pace_target && (
+              <span className="pill">
+                {workout.pace_target}
+              </span>
             )}
           </div>
 
-          {showDetails && w.description && (
-  <div className="workout-instructions">
-    <div className="eyebrow">
-      WORKOUT INSTRUCTIONS
-    </div>
+          {showDetails && workout.description && (
+            <div className="workout-instructions">
+              <div className="eyebrow">
+                WORKOUT INSTRUCTIONS
+              </div>
+              <p>{workout.description}</p>
+            </div>
+          )}
 
-    <p>{w.description}</p>
-  </div>
-)}
+          {showDetails &&
+            strength &&
+            workout.strength_exercises.length > 0 && (
+              <div className="workout-instructions">
+                <div className="eyebrow">EXERCISES</div>
+
+                {workout.strength_exercises.map((exercise) => (
+                  <div
+                    key={exercise.id}
+                    style={{
+                      padding: "10px 0",
+                      borderBottom:
+                        "1px solid var(--border, #e5e5e5)",
+                    }}
+                  >
+                    <div className="title">
+                      {exercise.exercise_order}.{" "}
+                      {exercise.exercise_name}
+                    </div>
+
+                    <div className="muted">
+                      {getExerciseTarget(exercise)}
+                    </div>
+
+                    {exercise.rest_seconds ? (
+                      <div className="muted">
+                        Rest {exercise.rest_seconds} sec
+                      </div>
+                    ) : null}
+
+                    {exercise.notes ? (
+                      <p>{exercise.notes}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
         </div>
       </div>
     </article>
   );
 }
 
-function Today({workouts,onComplete}:{workouts:Workout[];onComplete:(w:Workout)=>void}){const today=iso(),todayRuns=workouts.filter(w=>w.workout_date===today),yesterday=iso(new Date(Date.now()-86400000)),yRuns=workouts.filter(w=>w.workout_date===yesterday);return <><div className="eyebrow">TODAY</div><h1>{fmt(today)}</h1>{todayRuns.length?todayRuns.map(w=><WorkoutCard key={w.id} w={w} onComplete={onComplete}/>):<div className="card empty"><Sun size={35}/><h2>Nothing scheduled today</h2><p className="muted">Enjoy the day off, or log an unscheduled run.</p></div>}{yRuns.length>0&&<section className="section"><div className="eyebrow">YESTERDAY</div>{yRuns.map(w=><WorkoutCard key={w.id} w={w} onComplete={onComplete}/>)}</section>}</>}
-function weekBounds(offset=0){const d=new Date();d.setHours(12,0,0,0);const monday=new Date(d);monday.setDate(d.getDate()-((d.getDay()+6)%7)+offset*7);const sunday=new Date(monday);sunday.setDate(monday.getDate()+6);return{monday,sunday}}
+function Today({
+  workouts,
+  onComplete,
+}: {
+  workouts: Workout[];
+  onComplete: (workout: Workout) => void;
+}) {
+  const todayWorkouts = workouts.filter(
+    (workout) => workout.workout_date === APP_TODAY,
+  );
+
+  const yesterdayWorkouts = workouts.filter(
+    (workout) => workout.workout_date === APP_YESTERDAY,
+  );
+
+  return (
+    <>
+      <div className="eyebrow">TODAY</div>
+      <h1>{formatDate(APP_TODAY)}</h1>
+
+      {todayWorkouts.length > 0 ? (
+        todayWorkouts.map((workout) => (
+          <WorkoutCard
+            key={`${workout.source}-${workout.id}`}
+            workout={workout}
+            onComplete={onComplete}
+          />
+        ))
+      ) : (
+        <div className="card empty">
+          <Sun size={35} />
+          <h2>Nothing scheduled today</h2>
+          <p className="muted">
+            Enjoy the day off, or log an unscheduled run.
+          </p>
+        </div>
+      )}
+
+      {yesterdayWorkouts.length > 0 && (
+        <section className="section">
+          <div className="eyebrow">YESTERDAY</div>
+
+          {yesterdayWorkouts.map((workout) => (
+            <WorkoutCard
+              key={`${workout.source}-${workout.id}`}
+              workout={workout}
+              onComplete={onComplete}
+            />
+          ))}
+        </section>
+      )}
+    </>
+  );
+}
+
 function Week({
   workouts,
   onComplete,
@@ -157,26 +587,21 @@ function Week({
   onComplete: (workout: Workout) => void;
 }) {
   const [offset, setOffset] = useState(0);
-  const { monday, sunday } = weekBounds(offset);
+  const [selectedByWeek, setSelectedByWeek] = useState<
+    Record<string, string>
+  >({});
 
-  const weekStart = iso(monday);
-  const weekEnd = iso(sunday);
-  const today = iso();
+  const { monday, sunday } = getWeekBounds(offset);
+  const weekStart = dateToIso(monday);
+  const weekEnd = dateToIso(sunday);
 
-  const initialSelectedDate =
-    today >= weekStart && today <= weekEnd ? today : weekStart;
+  const defaultSelectedDate =
+    APP_TODAY >= weekStart && APP_TODAY <= weekEnd
+      ? APP_TODAY
+      : weekStart;
 
-  const [selectedDate, setSelectedDate] =
-    useState(initialSelectedDate);
-
-  useEffect(() => {
-    const nextSelectedDate =
-      today >= weekStart && today <= weekEnd
-        ? today
-        : weekStart;
-
-    setSelectedDate(nextSelectedDate);
-  }, [weekStart, weekEnd, today]);
+  const selectedDate =
+    selectedByWeek[weekStart] || defaultSelectedDate;
 
   const weekWorkouts = workouts.filter(
     (workout) =>
@@ -188,14 +613,20 @@ function Week({
     (workout) => workout.workout_date === selectedDate,
   );
 
-  const planned = weekWorkouts.reduce(
-    (total, workout) =>
-      total + Number(workout.planned_distance_km || 0),
-    0,
-  );
+  const planned = weekWorkouts
+    .filter((workout) => !isStrengthWorkout(workout))
+    .reduce(
+      (total, workout) =>
+        total + Number(workout.planned_distance_km || 0),
+      0,
+    );
 
   const actual = weekWorkouts
-    .filter((workout) => Boolean(workout.completed))
+    .filter(
+      (workout) =>
+        Boolean(workout.completed) &&
+        !isStrengthWorkout(workout),
+    )
     .reduce(
       (total, workout) =>
         total + Number(workout.actual_distance_km || 0),
@@ -226,16 +657,11 @@ function Week({
 
         <div style={{ textAlign: "center" }}>
           <div className="eyebrow">WEEK</div>
-
           <h2>
             {monday.getDate()}{" "}
-            {monday.toLocaleString("en", {
-              month: "short",
-            })}{" "}
-            – {sunday.getDate()}{" "}
-            {sunday.toLocaleString("en", {
-              month: "short",
-            })}
+            {monday.toLocaleString("en", { month: "short" })} –{" "}
+            {sunday.getDate()}{" "}
+            {sunday.toLocaleString("en", { month: "short" })}
           </h2>
         </div>
 
@@ -252,12 +678,12 @@ function Week({
       <div className="stats section">
         <div className="stat">
           <span className="muted">Planned</span>
-          <strong>{km(planned)}</strong>
+          <strong>{formatKm(planned)}</strong>
         </div>
 
         <div className="stat">
           <span className="muted">Actual</span>
-          <strong>{km(actual)}</strong>
+          <strong>{formatKm(actual)}</strong>
         </div>
       </div>
 
@@ -270,12 +696,14 @@ function Week({
 
       <div className="week-strip">
         {days.map((day) => {
-          const date = iso(day);
+          const date = dateToIso(day);
 
-          const dayDistance = weekWorkouts
-            .filter(
-              (workout) => workout.workout_date === date,
-            )
+          const dayWorkouts = weekWorkouts.filter(
+            (workout) => workout.workout_date === date,
+          );
+
+          const dayDistance = dayWorkouts
+            .filter((workout) => !isStrengthWorkout(workout))
             .reduce(
               (total, workout) =>
                 total +
@@ -287,18 +715,25 @@ function Week({
               0,
             );
 
+          const hasStrength = dayWorkouts.some(
+            isStrengthWorkout,
+          );
+
           const selected = selectedDate === date;
 
           return (
             <button
               key={date}
               type="button"
-              className={`day ${
-                selected ? "selected" : ""
-              }`}
+              className={`day ${selected ? "selected" : ""}`}
               aria-pressed={selected}
-              aria-label={`Show workouts for ${fmt(date)}`}
-              onClick={() => setSelectedDate(date)}
+              aria-label={`Show workouts for ${formatDate(date)}`}
+              onClick={() =>
+                setSelectedByWeek((current) => ({
+                  ...current,
+                  date,
+                }))
+              }
             >
               {day.toLocaleString("en", {
                 weekday: "narrow",
@@ -309,7 +744,9 @@ function Week({
               <small>
                 {dayDistance
                   ? `${dayDistance.toFixed(1)}k`
-                  : "–"}
+                  : hasStrength
+                    ? "S"
+                    : "–"}
               </small>
             </button>
           );
@@ -320,7 +757,7 @@ function Week({
         <div className="selected-day-heading">
           <div>
             <div className="eyebrow">SELECTED DAY</div>
-            <h2>{fmt(selectedDate)}</h2>
+            <h2>{formatDate(selectedDate)}</h2>
           </div>
 
           <span className="pill">
@@ -333,8 +770,8 @@ function Week({
         {selectedWorkouts.length > 0 ? (
           selectedWorkouts.map((workout) => (
             <WorkoutCard
-              key={workout.id}
-              w={workout}
+              key={`${workout.source}-${workout.id}`}
+              workout={workout}
               onComplete={onComplete}
               showDetails
             />
@@ -342,9 +779,7 @@ function Week({
         ) : (
           <div className="card empty">
             <Sun size={32} />
-
             <h2>Nothing scheduled</h2>
-
             <p className="muted">
               No workout is planned for this day.
             </p>
@@ -354,21 +789,176 @@ function Week({
     </>
   );
 }
-function Plan({workouts,onComplete}:{workouts:Workout[];onComplete:(w:Workout)=>void}){const grouped=useMemo(()=>{const m=new Map<number,Workout[]>();workouts.filter(w=>w.source!=="manual").forEach(w=>{const k=w.week_number||0;m.set(k,[...(m.get(k)||[]),w])});return [...m.entries()].sort((a,b)=>a[0]-b[0])},[workouts]);const planned=workouts.reduce((s,w)=>s+Number(w.planned_distance_km||0),0);return <><div className="eyebrow">FULL PLAN</div><h1>{workouts.length} workouts · {km(planned)} planned</h1>{grouped.length?grouped.map(([week,runs])=><section className="section" key={week}><div className="week-head"><div className="eyebrow">{week?`WEEK ${week}`:"UNASSIGNED"}</div><b>{km(runs.reduce((s,w)=>s+Number(w.planned_distance_km||0),0))}</b></div>{runs.map(w=><WorkoutCard key={w.id} w={w} onComplete={onComplete} showDate showDetails={false}/>)}</section>):<div className="card empty"><ClipboardList size={34}/><h2>No plan imported</h2><p className="muted">Open Settings to import your CSV plan.</p></div>}</>}
+
+function PlanView({
+  workouts,
+  activePlanId,
+  onComplete,
+}: {
+  workouts: Workout[];
+  activePlanId: string | null;
+  onComplete: (workout: Workout) => void;
+}) {
+  const plannedWorkouts = useMemo(
+    () =>
+      workouts.filter(
+        (workout) => workout.source !== "manual",
+      ),
+    [workouts],
+  );
+
+  const grouped = useMemo(() => {
+    const groups = new Map<number, Workout[]>();
+
+    plannedWorkouts.forEach((workout) => {
+      const week = workout.week_number || 0;
+
+      groups.set(week, [
+        ...(groups.get(week) || []),
+        workout,
+      ]);
+    });
+
+    return [...groups.entries()].sort(
+      (first, second) => first[0] - second[0],
+    );
+  }, [plannedWorkouts]);
+
+  const plannedDistance = plannedWorkouts
+    .filter((workout) => !isStrengthWorkout(workout))
+    .reduce(
+      (total, workout) =>
+        total + Number(workout.planned_distance_km || 0),
+      0,
+    );
+
+  const strengthCount = plannedWorkouts.filter(
+    isStrengthWorkout,
+  ).length;
+
+  return (
+    <>
+      <div className="eyebrow">FULL PLAN</div>
+
+      <h1>
+        {plannedWorkouts.length} workouts ·{" "}
+        {formatKm(plannedDistance)} planned
+      </h1>
+
+      {activePlanId && (
+        <div className="meta">
+          <span className="pill">Active plan</span>
+
+          {strengthCount > 0 && (
+            <span className="pill">
+              <Dumbbell size={13} />
+              {strengthCount} strength
+            </span>
+          )}
+        </div>
+      )}
+
+      {grouped.length > 0 ? (
+        grouped.map(([week, weekWorkouts]) => (
+          <section className="section" key={week}>
+            <div className="week-head">
+              <div className="eyebrow">
+                {week ? `WEEK ${week}` : "UNASSIGNED"}
+              </div>
+
+              <b>
+                {formatKm(
+                  weekWorkouts
+                    .filter(
+                      (workout) =>
+                        !isStrengthWorkout(workout),
+                    )
+                    .reduce(
+                      (total, workout) =>
+                        total +
+                        Number(
+                          workout.planned_distance_km || 0,
+                        ),
+                      0,
+                    ),
+                )}
+              </b>
+            </div>
+
+            {weekWorkouts.map((workout) => (
+              <WorkoutCard
+                key={workout.id}
+                workout={workout}
+                onComplete={onComplete}
+                showDate
+                showDetails={isStrengthWorkout(workout)}
+              />
+            ))}
+          </section>
+        ))
+      ) : (
+        <div className="card empty">
+          <ClipboardList size={34} />
+          <h2>No active plan</h2>
+          <p className="muted">
+            Open Settings to import or select a training plan.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
 function SettingsPage({
   api,
   onDone,
 }: {
-  api: (
-    path: string,
-    options?: RequestInit,
-  ) => Promise<any>;
+  api: ApiFunction;
   onDone: () => Promise<void>;
 }) {
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [importMode, setImportMode] =
+    useState("new-active");
+  const [replacePlanId, setReplacePlanId] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [historyConfirmation, setHistoryConfirmation] =
+    useState("");
 
-  async function submit(
+  const loadPlans = useCallback(async () => {
+    const data = await api<PlansResponse>("/api/plans");
+
+    setPlans(data.plans);
+
+    setReplacePlanId(
+      (current) => current || data.plans[0]?.id || "",
+    );
+  }, [api]);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        await loadPlans();
+      } catch (caughtError) {
+        setError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Could not load plans.",
+        );
+      } finally {
+        setPlansLoading(false);
+      }
+    }
+
+    void load();
+  }, [loadPlans]);
+
+  async function refreshEverything() {
+    await Promise.all([loadPlans(), onDone()]);
+  }
+
+  async function submitImport(
     event: React.FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
@@ -376,15 +966,19 @@ function SettingsPage({
     setMessage("");
     setError("");
 
+    const importForm = event.currentTarget;
+
     try {
-      const form = new FormData(event.currentTarget);
+      const form = new FormData(importForm);
       const selectedFile = form.get("file");
 
       if (!(selectedFile instanceof File)) {
         throw new Error("Choose a CSV file.");
       }
 
-      if (!selectedFile.name.toLowerCase().endsWith(".csv")) {
+      if (
+        !selectedFile.name.toLowerCase().endsWith(".csv")
+      ) {
         throw new Error(
           "The selected file must have a .csv extension.",
         );
@@ -394,21 +988,140 @@ function SettingsPage({
         throw new Error("The selected CSV file is empty.");
       }
 
-      const data = await api("/api/import", {
+      form.set("mode", importMode);
+
+      if (importMode === "replace") {
+        if (!replacePlanId) {
+          throw new Error("Choose the plan to replace.");
+        }
+
+        form.set("replacePlanId", replacePlanId);
+      }
+
+      const data = await api<ImportResponse>("/api/import", {
         method: "POST",
         body: form,
       });
 
       setMessage(
-        `Imported ${data.imported} workouts. Completed runs were preserved.`,
+        `Imported ${data.imported} workouts and ${data.strengthExercises} strength exercises. Workout history was preserved.`,
       );
 
-      await onDone();
-    } catch (error) {
+      importForm.reset();
+      setImportMode("new-active");
+
+      await refreshEverything();
+    } catch (caughtError) {
       setError(
-        error instanceof Error
-          ? error.message
-          : "Import failed",
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Import failed.",
+      );
+    }
+  }
+
+  async function selectPlan(planId: string) {
+    setMessage("");
+    setError("");
+
+    try {
+      await api<{
+        ok: boolean;
+        activePlanId: string;
+      }>("/api/plans", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ planId }),
+      });
+
+      setMessage("Active training plan updated.");
+      await refreshEverything();
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Could not select plan.",
+      );
+    }
+  }
+
+  async function deletePlan(plan: Plan) {
+    const confirmed = window.confirm(
+      `Delete "${plan.name}"? Planned workouts will be removed, but completed-workout history will remain saved.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setMessage("");
+    setError("");
+
+    try {
+      await api<{
+        ok: boolean;
+        activePlanId: string | null;
+      }>(`/api/plans/${plan.id}`, {
+        method: "DELETE",
+      });
+
+      setMessage(
+        "Training plan deleted. Workout history was preserved.",
+      );
+
+      await refreshEverything();
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Could not delete plan.",
+      );
+    }
+  }
+
+  async function eraseHistory() {
+    if (historyConfirmation !== "DELETE") {
+      setError(
+        'Type "DELETE" before erasing workout history.',
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Permanently erase all completed and manually logged workout history? This cannot be undone.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setMessage("");
+    setError("");
+
+    try {
+      const data = await api<DeleteHistoryResponse>(
+        "/api/workout-logs",
+        {
+          method: "DELETE",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            confirmation: historyConfirmation,
+          }),
+        },
+      );
+
+      setHistoryConfirmation("");
+      setMessage(`Deleted ${data.deleted} workout logs.`);
+      await onDone();
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Could not erase workout history.",
       );
     }
   }
@@ -416,12 +1129,84 @@ function SettingsPage({
   return (
     <>
       <div className="eyebrow">SETTINGS</div>
-      <h1>Training plan</h1>
+      <h1>Training plans</h1>
 
-      <form className="card" onSubmit={submit}>
+      {error && <div className="error">{error}</div>}
+      {message && <div className="success">{message}</div>}
+
+      <div className="card">
+        <h2>Your plans</h2>
+
+        {plansLoading ? (
+          <p className="muted">Loading plans…</p>
+        ) : plans.length > 0 ? (
+          plans.map((plan) => (
+            <div
+              key={plan.id}
+              style={{
+                padding: "14px 0",
+                borderBottom:
+                  "1px solid var(--border, #e5e5e5)",
+              }}
+            >
+              <div className="week-head">
+                <div>
+                  <div className="title">{plan.name}</div>
+
+                  <div className="muted">
+                    {plan.workout_count} workouts
+                    {Number(plan.strength_workout_count) > 0
+                      ? ` · ${plan.strength_workout_count} strength`
+                      : ""}
+                  </div>
+                </div>
+
+                {Boolean(plan.active) && (
+                  <span className="pill">Active</span>
+                )}
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  marginTop: 12,
+                }}
+              >
+                {!plan.active && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void selectPlan(plan.id)}
+                  >
+                    Use this plan
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  className="secondary"
+                  aria-label={`Delete ${plan.name}`}
+                  onClick={() => void deletePlan(plan)}
+                >
+                  <Trash2 size={16} />
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="muted">
+            No training plans have been uploaded.
+          </p>
+        )}
+      </div>
+
+      <form className="card" onSubmit={submitImport}>
+        <h2>Import CSV</h2>
+
         <div className="field">
           <label htmlFor="plan-name">PLAN NAME</label>
-
           <input
             id="plan-name"
             name="planName"
@@ -429,6 +1214,58 @@ function SettingsPage({
             required
           />
         </div>
+
+        <div className="field">
+          <label htmlFor="import-mode">IMPORT OPTION</label>
+
+          <select
+            id="import-mode"
+            name="mode"
+            value={importMode}
+            onChange={(event) =>
+              setImportMode(event.target.value)
+            }
+          >
+            <option value="new-active">
+              Add as new active plan
+            </option>
+
+            <option value="new-inactive">
+              Add without changing active plan
+            </option>
+
+            <option value="replace">
+              Replace an existing plan
+            </option>
+          </select>
+        </div>
+
+        {importMode === "replace" && (
+          <div className="field">
+            <label htmlFor="replace-plan">
+              PLAN TO REPLACE
+            </label>
+
+            <select
+              id="replace-plan"
+              name="replacePlanId"
+              value={replacePlanId}
+              onChange={(event) =>
+                setReplacePlanId(event.target.value)
+              }
+              required
+            >
+              <option value="">Choose a plan</option>
+
+              {plans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.name}
+                  {plan.active ? " (active)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="field">
           <label htmlFor="training-plan-file">
@@ -440,26 +1277,16 @@ function SettingsPage({
             id="training-plan-file"
             name="file"
             type="file"
+            accept=".csv,text/csv"
             required
           />
         </div>
 
         <p className="muted">
-          On iPhone, save the CSV to the Files app first,
-          then select it using Choose File.
+          Run and strength workouts can be included in the
+          same CSV. Each strength exercise should use a
+          separate row with the same workout_id.
         </p>
-
-        <p className="muted">
-          Columns: date, week_number, day_of_week,
-          workout_type, title, distance_km, duration_min,
-          description, pace_target, notes.
-        </p>
-
-        {error && <div className="error">{error}</div>}
-
-        {message && (
-          <div className="success">{message}</div>
-        )}
 
         <button className="primary" type="submit">
           Import CSV
@@ -467,8 +1294,41 @@ function SettingsPage({
       </form>
 
       <div className="card">
-        <h2>Polar Flow</h2>
+        <h2>Workout history</h2>
 
+        <p className="muted">
+          Erasing history permanently removes completed
+          workouts, manual runs, actual distances, strength
+          logs, and workout notes. Training plans remain.
+        </p>
+
+        <div className="field">
+          <label htmlFor="delete-confirmation">
+            TYPE DELETE TO CONFIRM
+          </label>
+
+          <input
+            id="delete-confirmation"
+            value={historyConfirmation}
+            onChange={(event) =>
+              setHistoryConfirmation(event.target.value)
+            }
+            placeholder="DELETE"
+          />
+        </div>
+
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => void eraseHistory()}
+        >
+          <Trash2 size={16} />
+          Erase workout history
+        </button>
+      </div>
+
+      <div className="card">
+        <h2>Polar Flow</h2>
         <p className="muted">
           Planned for a future release. The data model
           already records workout source information.
@@ -476,52 +1336,406 @@ function SettingsPage({
       </div>
 
       <div className="card">
-  <h2>Account</h2>
+        <h2>Account</h2>
 
-  <p className="muted">
-    Sign out of RUN on this device. Your training plans,
-    completed workouts, actual kilometres, and notes will
-    remain saved to your account.
-  </p>
+        <p className="muted">
+          Sign out of RUN on this device. Your training
+          plans and workout history will remain saved.
+        </p>
 
-  <button
-    type="button"
-    className="secondary"
-    onClick={async () => {
-      setError("");
+        <button
+          type="button"
+          className="secondary"
+          onClick={async () => {
+            setError("");
 
-      try {
-        const response = await fetch(
-          "/api/auth/logout",
-          {
-            method: "POST",
-            credentials: "include",
-          },
-        );
+            try {
+              const response = await fetch(
+                "/api/auth/logout",
+                {
+                  method: "POST",
+                  credentials: "include",
+                },
+              );
 
-        if (!response.ok) {
-          const data = await response.json();
+              if (!response.ok) {
+                const data = (await response.json()) as {
+                  error?: string;
+                };
 
-          throw new Error(
-            data.error ?? "Could not sign out.",
-          );
-        }
+                throw new Error(
+                  data.error || "Could not sign out.",
+                );
+              }
 
-        window.location.href = "/login";
-      } catch (error) {
-        setError(
-          error instanceof Error
-            ? error.message
-            : "Could not sign out.",
-        );
-      }
-    }}
-  >
-    Sign out
-  </button>
-</div>
+              window.location.replace("/login");
+            } catch (caughtError) {
+              setError(
+                caughtError instanceof Error
+                  ? caughtError.message
+                  : "Could not sign out.",
+              );
+            }
+          }}
+        >
+          Sign out
+        </button>
+      </div>
     </>
   );
 }
-function Nav({tab,onChange}:{tab:Tab;onChange:(t:Tab)=>void}){const items:[Tab,React.ReactNode,string][]=[["today",<CalendarDays key="i" size={20}/>,"Today"],["week",<CalendarRange key="i" size={20}/>,"Week"],["plan",<ClipboardList key="i" size={20}/>,"Plan"],["settings",<Settings key="i" size={20}/>,"Settings"]];return <nav className="nav">{items.map(([id,icon,label])=><button key={id} className={tab===id?"active":""} onClick={()=>onChange(id)}>{icon}{label}</button>)}</nav>}
-function WorkoutModal({modal,api,close,done}:{modal:any;api:(p:string,o?:RequestInit)=>Promise<any>;close:()=>void;done:()=>Promise<void>}){const w:Workout|undefined=modal.workout,[err,setErr]=useState("");async function submit(e:React.FormEvent<HTMLFormElement>){e.preventDefault();setErr("");const fd=new FormData(e.currentTarget);try{if(modal.kind==="manual")await api("/api/workouts",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({date:fd.get("date"),title:fd.get("title"),actualDistanceKm:fd.get("distance"),durationMin:fd.get("duration"),notes:fd.get("notes")})});else await api(`/api/workouts/${w!.id}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({completed:true,actualDistanceKm:fd.get("distance"),notes:fd.get("notes")})});await done()}catch(e){setErr(e instanceof Error?e.message:"Could not save")}}return <div className="dialog-back" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><form className="dialog" onSubmit={submit}><div className="dialog-head"><h2>{modal.kind==="manual"?"Log a run":"Complete workout"}</h2><button type="button" className="icon-btn" onClick={close}><X size={18}/></button></div>{modal.kind==="manual"?<><div className="field"><label>DATE</label><input name="date" type="date" defaultValue={iso()} required/></div><div className="field"><label>TITLE</label><input name="title" defaultValue="Manual run" required/></div></>:<p className="muted">{w!.title} · planned {km(Number(w!.planned_distance_km||0))}</p>}<div className="field"><label>ACTUAL DISTANCE (KM)</label><input name="distance" type="number" min="0" step="0.01" defaultValue={w?.actual_distance_km??w?.planned_distance_km??""} required/></div>{modal.kind==="manual"&&<div className="field"><label>DURATION (MINUTES)</label><input name="duration" type="number" min="0" step="1"/></div>}<div className="field"><label>NOTES</label><textarea name="notes" rows={3} defaultValue={w?.workout_notes||""}/></div>{err&&<div className="error">{err}</div>}<button className="primary" type="submit">Save run</button>{modal.kind==="complete"&&w?.completed&&<button className="secondary" style={{marginTop:10}} type="button" onClick={async()=>{await api(`/api/workouts/${w.id}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({completed:false})});await done()}}>Mark incomplete</button>}</form></div>}
+
+function Nav({
+  tab,
+  onChange,
+}: {
+  tab: Tab;
+  onChange: (tab: Tab) => void;
+}) {
+  const items: [Tab, React.ReactNode, string][] = [
+    [
+      "today",
+      <CalendarDays key="today-icon" size={20} />,
+      "Today",
+    ],
+    [
+      "week",
+      <CalendarRange key="week-icon" size={20} />,
+      "Week",
+    ],
+    [
+      "plan",
+      <ClipboardList key="plan-icon" size={20} />,
+      "Plan",
+    ],
+    [
+      "settings",
+      <Settings key="settings-icon" size={20} />,
+      "Settings",
+    ],
+  ];
+
+  return (
+    <nav className="nav">
+      {items.map(([id, icon, label]) => (
+        <button
+          key={id}
+          type="button"
+          className={tab === id ? "active" : ""}
+          onClick={() => onChange(id)}
+        >
+          {icon}
+          {label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function WorkoutModal({
+  modal,
+  api,
+  close,
+  done,
+}: {
+  modal: Exclude<ModalState, null>;
+  api: ApiFunction;
+  close: () => void;
+  done: () => Promise<void>;
+}) {
+  const workout =
+    modal.kind === "complete" ? modal.workout : null;
+
+  const strength =
+    workout !== null && isStrengthWorkout(workout);
+
+  const [modalError, setModalError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    setModalError("");
+    setSaving(true);
+
+    const form = new FormData(event.currentTarget);
+
+    try {
+      if (modal.kind === "manual") {
+        await api<{
+          id: string;
+          logId: string;
+        }>("/api/workouts", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            date: form.get("date"),
+            title: form.get("title"),
+            actualDistanceKm: form.get("distance"),
+            durationMin: form.get("duration"),
+            notes: form.get("notes"),
+          }),
+        });
+      } else {
+        const completedWorkout = modal.workout;
+        const completedStrength =
+          isStrengthWorkout(completedWorkout);
+
+        await api<{
+          ok: boolean;
+          logId: string;
+        }>(`/api/workouts/${completedWorkout.id}`, {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            completed: true,
+            actualDistanceKm: completedStrength
+              ? null
+              : form.get("distance"),
+            actualDurationMin: form.get("duration"),
+            notes: form.get("notes"),
+          }),
+        });
+      }
+
+      await done();
+    } catch (caughtError) {
+      setModalError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Could not save workout.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeLog() {
+    if (!workout) {
+      return;
+    }
+
+    const message =
+      workout.source === "manual"
+        ? "Delete this manually logged workout?"
+        : "Remove this completion log and mark the workout incomplete?";
+
+    if (!window.confirm(message)) {
+      return;
+    }
+
+    setModalError("");
+    setSaving(true);
+
+    try {
+      if (workout.log_id) {
+        await api<{ ok: boolean }>(
+          `/api/workout-logs/${workout.log_id}`,
+          { method: "DELETE" },
+        );
+      } else {
+        await api<{ ok: boolean }>(
+          `/api/workouts/${workout.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              completed: false,
+            }),
+          },
+        );
+      }
+
+      await done();
+    } catch (caughtError) {
+      setModalError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Could not remove workout log.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="dialog-back"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          close();
+        }
+      }}
+    >
+      <form className="dialog" onSubmit={submit}>
+        <div className="dialog-head">
+          <h2>
+            {modal.kind === "manual"
+              ? "Log a run"
+              : strength
+                ? "Complete strength workout"
+                : "Complete workout"}
+          </h2>
+
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={close}
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {modal.kind === "manual" ? (
+          <>
+            <div className="field">
+              <label>DATE</label>
+              <input
+                name="date"
+                type="date"
+                defaultValue={APP_TODAY}
+                required
+              />
+            </div>
+
+            <div className="field">
+              <label>TITLE</label>
+              <input
+                name="title"
+                defaultValue="Manual run"
+                required
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="muted">
+              {modal.workout.title}
+              {!isStrengthWorkout(modal.workout)
+                ? ` · planned ${formatKm(
+                    Number(
+                      modal.workout.planned_distance_km || 0,
+                    ),
+                  )}`
+                : ""}
+            </p>
+
+            {isStrengthWorkout(modal.workout) &&
+              modal.workout.strength_exercises.length > 0 && (
+                <div className="card">
+                  <div className="eyebrow">
+                    PLANNED EXERCISES
+                  </div>
+
+                  {modal.workout.strength_exercises.map(
+                    (exercise) => (
+                      <p key={exercise.id}>
+                        <strong>
+                          {exercise.exercise_order}.{" "}
+                          {exercise.exercise_name}
+                        </strong>
+
+                        <br />
+
+                        <span className="muted">
+                          {getExerciseTarget(exercise)}
+                        </span>
+                      </p>
+                    ),
+                  )}
+                </div>
+              )}
+          </>
+        )}
+
+        {!strength && (
+          <div className="field">
+            <label>ACTUAL DISTANCE (KM)</label>
+
+            <input
+              name="distance"
+              type="number"
+              min="0"
+              step="0.01"
+              defaultValue={
+                workout?.actual_distance_km ??
+                workout?.planned_distance_km ??
+                ""
+              }
+              required
+            />
+          </div>
+        )}
+
+        <div className="field">
+          <label>DURATION (MINUTES)</label>
+
+          <input
+            name="duration"
+            type="number"
+            min="0"
+            step="1"
+            defaultValue={
+              workout?.actual_duration_min ??
+              workout?.duration_min ??
+              ""
+            }
+          />
+        </div>
+
+        <div className="field">
+          <label>NOTES</label>
+
+          <textarea
+            name="notes"
+            rows={3}
+            defaultValue={workout?.workout_notes || ""}
+          />
+        </div>
+
+        {modalError && (
+          <div className="error">{modalError}</div>
+        )}
+
+        <button
+          className="primary"
+          type="submit"
+          disabled={saving}
+        >
+          {saving
+            ? "Saving…"
+            : strength
+              ? "Save strength workout"
+              : "Save run"}
+        </button>
+
+        {modal.kind === "complete" &&
+          (modal.workout.completed ||
+            modal.workout.source === "manual") && (
+            <button
+              className="secondary"
+              style={{ marginTop: 10 }}
+              type="button"
+              disabled={saving}
+              onClick={() => void removeLog()}
+            >
+              <Trash2 size={16} />
+
+              {modal.workout.source === "manual"
+                ? "Delete logged workout"
+                : "Remove completion log"}
+            </button>
+          )}
+      </form>
+    </div>
+  );
+}
