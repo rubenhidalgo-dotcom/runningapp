@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Download,
   Dumbbell,
   Plus,
   Settings,
@@ -125,6 +126,145 @@ const APP_YESTERDAY = (() => {
   return dateToIso(date);
 })();
 
+const CSV_HEADERS = [
+  "date",
+  "week_number",
+  "day_of_week",
+  "workout_type",
+  "workout_id",
+  "title",
+  "distance_km",
+  "duration_min",
+  "description",
+  "pace_target",
+  "notes",
+  "exercise_order",
+  "exercise_name",
+  "sets",
+  "reps",
+  "weight",
+  "weight_unit",
+  "duration_seconds",
+  "distance_meters",
+  "rest_seconds",
+  "rir",
+  "rpe",
+  "tempo",
+  "side",
+  "exercise_notes",
+];
+
+const CSV_EXAMPLE_ROWS = [
+  [
+    "2026-11-02",
+    "1",
+    "Monday",
+    "run",
+    "W1-R1",
+    "Easy Run",
+    "8",
+    "50",
+    "Conversational aerobic run",
+    "5:50-6:10/km",
+    "Keep the effort relaxed",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+  ],
+  [
+    "2026-11-03",
+    "1",
+    "Tuesday",
+    "strength",
+    "W1-S1",
+    "Lower Body Strength",
+    "0",
+    "50",
+    "Running-specific strength",
+    "",
+    "Use controlled repetitions",
+    "1",
+    "Back Squat",
+    "4",
+    "6",
+    "70",
+    "kg",
+    "",
+    "",
+    "120",
+    "2",
+    "7",
+    "3-1-1",
+    "both",
+    "Keep the torso stable",
+  ],
+  [
+    "2026-11-03",
+    "1",
+    "Tuesday",
+    "strength",
+    "W1-S1",
+    "Lower Body Strength",
+    "0",
+    "50",
+    "Running-specific strength",
+    "",
+    "Use controlled repetitions",
+    "2",
+    "Reverse Lunge",
+    "3",
+    "8",
+    "12",
+    "kg",
+    "",
+    "",
+    "90",
+    "2",
+    "7",
+    "",
+    "alternating",
+    "Eight repetitions per leg",
+  ],
+  [
+    "2026-11-03",
+    "1",
+    "Tuesday",
+    "strength",
+    "W1-S1",
+    "Lower Body Strength",
+    "0",
+    "50",
+    "Running-specific strength",
+    "",
+    "Use controlled repetitions",
+    "3",
+    "Plank",
+    "3",
+    "",
+    "",
+    "bodyweight",
+    "45",
+    "",
+    "60",
+    "",
+    "7",
+    "",
+    "both",
+    "Hold each set for 45 seconds",
+  ],
+];
+
 function formatDate(date: string) {
   return new Intl.DateTimeFormat("en-GB", {
     weekday: "long",
@@ -135,6 +275,41 @@ function formatDate(date: string) {
 
 function formatKm(value: number) {
   return `${value.toFixed(1)} km`;
+}
+
+function escapeCsvValue(value: string) {
+  if (
+    value.includes(",") ||
+    value.includes('"') ||
+    value.includes("\n")
+  ) {
+    return `"${value.replaceAll('"', '""')}"`;
+  }
+
+  return value;
+}
+
+function downloadCsvTemplate() {
+  const csv = [CSV_HEADERS, ...CSV_EXAMPLE_ROWS]
+    .map((row) => row.map(escapeCsvValue).join(","))
+    .join("\r\n");
+
+  const blob = new Blob([`\uFEFF${csv}`], {
+    type: "text/csv;charset=utf-8",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = "run-training-plan-template.csv";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 1000);
 }
 
 function parseStrengthExercises(
@@ -150,6 +325,7 @@ function parseStrengthExercises(
 
   try {
     const parsed: unknown = JSON.parse(value);
+
     return Array.isArray(parsed)
       ? (parsed as StrengthExercise[])
       : [];
@@ -587,6 +763,7 @@ function Week({
   onComplete: (workout: Workout) => void;
 }) {
   const [offset, setOffset] = useState(0);
+
   const [selectedByWeek, setSelectedByWeek] = useState<
     Record<string, string>
   >({});
@@ -657,11 +834,16 @@ function Week({
 
         <div style={{ textAlign: "center" }}>
           <div className="eyebrow">WEEK</div>
+
           <h2>
             {monday.getDate()}{" "}
-            {monday.toLocaleString("en", { month: "short" })} –{" "}
-            {sunday.getDate()}{" "}
-            {sunday.toLocaleString("en", { month: "short" })}
+            {monday.toLocaleString("en", {
+              month: "short",
+            })}{" "}
+            – {sunday.getDate()}{" "}
+            {sunday.toLocaleString("en", {
+              month: "short",
+            })}
           </h2>
         </div>
 
@@ -731,7 +913,7 @@ function Week({
               onClick={() =>
                 setSelectedByWeek((current) => ({
                   ...current,
-                  date,
+                  [weekStart]: date,
                 }))
               }
             >
@@ -900,6 +1082,7 @@ function PlanView({
         <div className="card empty">
           <ClipboardList size={34} />
           <h2>No active plan</h2>
+
           <p className="muted">
             Open Settings to import or select a training plan.
           </p>
@@ -972,9 +1155,9 @@ function SettingsPage({
       const form = new FormData(importForm);
       const selectedFile = form.get("file");
 
-      if (!(selectedFile instanceof File)) {
-        throw new Error("Choose a CSV file.");
-      }
+    if (!(selectedFile instanceof File)) {
+      throw new Error("Choose a CSV file.");
+    }
 
       if (
         !selectedFile.name.toLowerCase().endsWith(".csv")
@@ -1171,6 +1354,7 @@ function SettingsPage({
                   display: "flex",
                   gap: 10,
                   marginTop: 12,
+                  flexWrap: "wrap",
                 }}
               >
                 {!plan.active && (
@@ -1205,8 +1389,133 @@ function SettingsPage({
       <form className="card" onSubmit={submitImport}>
         <h2>Import CSV</h2>
 
+        <div
+          className="workout-instructions"
+          style={{ marginBottom: 20 }}
+        >
+          <div className="eyebrow">CSV FORMAT</div>
+
+          <h3>Start with the template</h3>
+
+          <p className="muted">
+            Download the template, open it in Excel,
+            Numbers, Google Sheets, or another spreadsheet
+            app, replace the example rows with your training
+            plan, and export or save the result as a
+            comma-separated CSV file.
+          </p>
+
+          <button
+            type="button"
+            className="secondary"
+            onClick={downloadCsvTemplate}
+            style={{ marginBottom: 18 }}
+          >
+            <Download size={16} />
+            Download CSV template
+          </button>
+
+          <div
+            style={{
+              display: "grid",
+              gap: 16,
+            }}
+          >
+            <div>
+              <div className="title">Running workouts</div>
+
+              <p className="muted">
+                Use one row for each run. Set{" "}
+                <strong>workout_type</strong> to{" "}
+                <strong>run</strong>. Enter the planned
+                distance in kilometres in{" "}
+                <strong>distance_km</strong>. Leave all
+                exercise fields empty.
+              </p>
+            </div>
+
+            <div>
+              <div className="title">Strength workouts</div>
+
+              <p className="muted">
+                Use one row for each exercise and set{" "}
+                <strong>workout_type</strong> to{" "}
+                <strong>strength</strong>. Every exercise in
+                the same session must have the same{" "}
+                <strong>date</strong>,{" "}
+                <strong>workout_id</strong>, and{" "}
+                <strong>title</strong>. Use{" "}
+                <strong>exercise_order</strong> to number the
+                exercises from 1.
+              </p>
+            </div>
+
+            <div>
+              <div className="title">
+                Required strength fields
+              </div>
+
+              <p className="muted">
+                Every strength row needs{" "}
+                <strong>exercise_name</strong>,{" "}
+                <strong>exercise_order</strong>, and{" "}
+                <strong>sets</strong>. It must also include
+                at least one target: <strong>reps</strong>,{" "}
+                <strong>duration_seconds</strong>, or{" "}
+                <strong>distance_meters</strong>.
+              </p>
+            </div>
+
+            <div>
+              <div className="title">Accepted values</div>
+
+              <p className="muted">
+                Dates must use <strong>YYYY-MM-DD</strong>.
+                <br />
+                workout_type: run or strength.
+                <br />
+                weight_unit: kg, lb, or bodyweight.
+                <br />
+                side: both, left, right, or alternating.
+                <br />
+                rpe: a number from 1 to 10.
+                <br />
+                rir: zero or a positive whole number.
+              </p>
+            </div>
+          </div>
+
+          <details style={{ marginTop: 16 }}>
+            <summary
+              style={{
+                cursor: "pointer",
+                fontWeight: 700,
+              }}
+            >
+              Show all supported columns
+            </summary>
+
+            <p
+              className="muted"
+              style={{
+                lineHeight: 1.7,
+                overflowWrap: "anywhere",
+              }}
+            >
+              date, week_number, day_of_week, workout_type,
+              workout_id, title, distance_km, duration_min,
+              description, pace_target, notes,
+              exercise_order, exercise_name, sets, reps,
+              weight, weight_unit, duration_seconds,
+              distance_meters, rest_seconds, rir, rpe, tempo,
+              side, exercise_notes
+            </p>
+          </details>
+        </div>
+
         <div className="field">
           <label htmlFor="plan-name">PLAN NAME</label>
+
           <input
             id="plan-name"
             name="planName"
@@ -1282,12 +1591,6 @@ function SettingsPage({
           />
         </div>
 
-        <p className="muted">
-          Run and strength workouts can be included in the
-          same CSV. Each strength exercise should use a
-          separate row with the same workout_id.
-        </p>
-
         <button className="primary" type="submit">
           Import CSV
         </button>
@@ -1329,6 +1632,7 @@ function SettingsPage({
 
       <div className="card">
         <h2>Polar Flow</h2>
+
         <p className="muted">
           Planned for a future release. The data model
           already records workout source information.
@@ -1339,8 +1643,8 @@ function SettingsPage({
         <h2>Account</h2>
 
         <p className="muted">
-          Sign out of RUN on this device. Your training
-          plans and workout history will remain saved.
+          Sign out of RUN on this device. Your training plans
+          and workout history will remain saved.
         </p>
 
         <button
@@ -1599,6 +1903,7 @@ function WorkoutModal({
           <>
             <div className="field">
               <label>DATE</label>
+
               <input
                 name="date"
                 type="date"
@@ -1609,6 +1914,7 @@ function WorkoutModal({
 
             <div className="field">
               <label>TITLE</label>
+
               <input
                 name="title"
                 defaultValue="Manual run"
@@ -1620,6 +1926,7 @@ function WorkoutModal({
           <>
             <p className="muted">
               {modal.workout.title}
+
               {!isStrengthWorkout(modal.workout)
                 ? ` · planned ${formatKm(
                     Number(
